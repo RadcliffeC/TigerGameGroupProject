@@ -998,6 +998,103 @@ class BearGame{
            return -1; // no active token
         }
 
+      int countTigerMoves()
+	    {
+	        Point p = token[TIGER].getLocation();
+	        int cnt = 0;
+
+	        token[TIGER].setAttached(true);
+	        for(int row = 0; row < GRID_ROW; row++)
+            {
+                for(int col = 0; col < GRID_COL; col++)
+                {
+                    Point dest(columnToX(col), rowToY(row));
+                    int mv = legalMove(p, dest, true);
+                    if(mv == GOOD_MOVE || JUMP_MOVE)
+                    {
+                        cnt++;
+                    }
+                }
+            }
+            token[TIGER].setAttached(false);
+            return cnt;
+	    }
+
+	    void autoMove(SDL_Plotter& g)
+	    {
+	        if(isTigersTurn())
+            {
+                Point src = token[TIGER].getLocation();
+                vector<Point> steps, jumps;
+
+                token[TIGER].setAttached(true);
+                for(int r = 0; r < GRID_ROW; r++)
+                {
+                    for(int c = 0; c < GRID_COL; c++)
+                    {
+                        Point dst(columnToX(c), rowToY(r));
+                        int mv = legalMove(src, dst);
+                        if(mv == JUMP_MOVE) jumps.push_back(dst);
+                        else if(mv == GOOD_MOVE) steps.push_back(dst);
+                    }
+                }
+                token[TIGER].setAttached(false);
+
+                Point choice = src;
+                if(!jumps.empty()) choice = jumps[rand() % jumps.size()];
+                else if(!steps.empty()) choice = steps[rand() % steps.size()];
+
+                token[TIGER].setAttached(true);
+                updateTokenLocation(choice, g);
+            }
+            else
+            {
+                struct Move { int idx; Point dst; };
+                vector<Move> candidates;
+                int bestScore = INT_MAX;
+
+                for(int i = 1; i < NUM_TOKENS; i++)
+                {
+                    if(!token[i].isActive()) continue;
+                    Point src = token[i].getLocation();
+
+                    for(int r = 0; r < GRID_ROW; r++)
+                    {
+                        for(int c = 0; c < GRID_COL; c++)
+                        {
+                            Point dst(columnToX(c), rowToY(r));
+                            if(legalMove(src, dst) != GOOD_MOVE) continue;
+
+                            token[i].setLocation(dst);
+                            int score = countTigerMoves();
+                            token[i].setLocation(src);
+
+                            if(score < bestScore)
+                            {
+                                bestScore = score;
+                                candidates.clear();
+                                candidates.push_back({i, dst});
+                            }
+                            else if(score == bestScore)
+                            {
+                                candidates.push_back({i, dst});
+                            }
+                        }
+                    }
+                }
+
+                if(!candidates.empty())
+                {
+                    auto m = candidates[rand() % candidates.size()];
+                    token[m.idx].setAttached(true);
+                    updateTokenLocation(m.dst, g);
+                }
+                else
+                {
+                    randomMove(g);
+                }
+            }
+	    }
 };
 
 

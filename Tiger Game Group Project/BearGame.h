@@ -997,30 +997,7 @@ class BearGame{
                }
            return -1; // no active token
         }
-
-      int countTigerMoves()
-	    {
-	        Point p = token[TIGER].getLocation();
-	        int cnt = 0;
-
-	        token[TIGER].setAttached(true);
-	        for(int row = 0; row < GRID_ROW; row++)
-            {
-                for(int col = 0; col < GRID_COL; col++)
-                {
-                    Point dest(columnToX(col), rowToY(row));
-                    int mv = legalMove(p, dest, true);
-                    if(mv == GOOD_MOVE || JUMP_MOVE)
-                    {
-                        cnt++;
-                    }
-                }
-            }
-            token[TIGER].setAttached(false);
-            return cnt;
-	    }
-
-	    void autoMove(SDL_Plotter& g)
+	void autoMove(SDL_Plotter& g)
 	    {
 	        if(isTigersTurn())
             {
@@ -1053,22 +1030,99 @@ class BearGame{
                 vector<Move> candidates;
                 int bestScore = INT_MAX;
 
+                // Precompute the tiger's current position
+                Point tigerPos = token[TIGER].getLocation();
+
+                // Corner points to herd the tiger toward
+                static const Point corners[] =
+                {
+                    {0, 4},{4, 0},{4, 8},{12, 0},{12, 8}
+                };
+
+                auto dist = [&](Point a, Point b)
+                {
+                    return abs(a.x - b.x) + abs(a.y - b.y);
+                };
+                auto nearestCorner = [&](Point t)
+                {
+                    int d = INT_MAX;
+                    for(auto &c : corners)
+                    {
+                        d = min(d, dist(t, c));
+                    }
+                    return d;
+                };
+
+                //Helper: does moving 'i' -> 'dst' leave it adjacent to at least one other man?
+                auto isSupported = [&](int i, Point dst)
+                {
+                    //simulate move
+                    Point orig = token[i].getLocation();
+                    token[i].setLocation(dst);
+                    bool ok = false;
+                    for(int j = 1; j < NUM_TOKENS && !ok; ++j)
+                    {
+                        if(j == i || !token[j].isActive()) continue;
+                        if(dist(dst, token[j].getLocation()) == 1)
+                        {
+                            ok = true;
+                        }
+                    }
+                    token[i].setLocation(orig);
+                    return ok;
+                };
+
+                //Weighted evaluation of how "dangerous" the tiger is after a hypothetical blue move
+                auto evaluate = [&](vector<Token>& simTokens)
+                {
+
+                    //1) count tiger's steps & jumps
+                    int steps = 0, jumps = 0;
+                    for(int r = (tigerPos.y-Y_OFFSET-2*LINE_SPACING)/60; r <= (tigerPos.y)/60; r++)
+                    {
+                        for(int c = (tigerPos.x-X_OFFSET-2*LINE_SPACING/60); c <=(tigerPos.x)/60; c++)
+                        {
+                            Point p = simTokens[TIGER].getLocation();
+                            Point d =(columnToX(c), rowToY(r));
+                            int mv = legalMove(p, d);
+                            if(mv == GOOD_MOVE) steps++;
+                            if(mv == JUMP_MOVE) jumps++;
+                        }
+                    }
+                    //2) measure men remaining
+                    int menLeft = 0;
+                    for(int i = 1; i < NUM_TOKENS; i++)
+                    {
+                        if(simTokens[i].isActive()) menLeft++;
+                    }
+                    //3) corner-pushing: how close the tiger is to the nearest corner
+                    Point tpos = simTokens[TIGER].getLocation();
+                    int cornerD = nearestCorner(tpos);
+
+                    //composite danger score
+                    return steps + 10 * jumps - 5 * menLeft - 2 * cornerD;
+                };
+
+                //1) gather all GOOD_MOVE blue candidates, but enforce support
                 for(int i = 1; i < NUM_TOKENS; i++)
                 {
                     if(!token[i].isActive()) continue;
                     Point src = token[i].getLocation();
 
-                    for(int r = 0; r < GRID_ROW; r++)
+                    for(int r = (src.y-180)/60; r <= (src.y-60)/60; r++)
                     {
-                        for(int c = 0; c < GRID_COL; c++)
+                        for(int c = (src.x-180)/60; c <= (src.x-60)/60; c++)
                         {
                             Point dst(columnToX(c), rowToY(r));
                             if(legalMove(src, dst) != GOOD_MOVE) continue;
-
+                            if(!isSupported(i, dst)) continue; //skip isolates
+                            //simulate
+                            auto backup = token;
                             token[i].setLocation(dst);
-                            int score = countTigerMoves();
+                            vector<Token> simTokens(token, token + NUM_TOKENS);
+                            int score = evaluate(simTokens);
                             token[i].setLocation(src);
-
+                            //track best
                             if(score < bestScore)
                             {
                                 bestScore = score;
@@ -1083,6 +1137,7 @@ class BearGame{
                     }
                 }
 
+                //pick one of the optimal candidates
                 if(!candidates.empty())
                 {
                     auto m = candidates[rand() % candidates.size()];
